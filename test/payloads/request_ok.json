@@ -1,0 +1,26 @@
+{
+  "documento": {
+    "numero": "000123",
+    "serie": "1",
+    "dataEmissao": "2026-10-13",
+    "ufOrigem": "SP",
+    "ufDestino": "RJ"
+  },
+  "itens": [
+    {
+      "item": 1,
+      "ncm": "84713012",
+      "descricao": "Notebook 14 polegadas",
+      "quantidade": 2,
+      "valorUnitario": 4500.00,
+      "desconto": 200.00
+    },
+    {
+      "item": 2,
+      "ncm": "85176277",
+      "descricao": "Roteador Wi-Fi",
+      "quantidade": 3,
+      "valorUnitario": 389.90
+    }
+  ]
+}
