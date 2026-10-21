@@ -1,10 +1,11 @@
 /*
  * Testes locais dos scripts do iFlow (sem tenant CPI).
  * Como rodar (na raiz do repositório, com Groovy instalado):
- *   groovyc -d build test/mock/com/sap/gateway/ip/core/customdev/util/Message.groovy
+ *   groovyc -d build $(find test/mock -name "*.groovy")
  *   groovy -cp build test/RodarTestes.groovy
  */
 import com.sap.gateway.ip.core.customdev.util.Message
+import com.sap.it.api.mapping.ValueMappingApi
 import groovy.json.JsonSlurper
 
 def raiz = new File(getClass().protectionDomain.codeSource.location.path).parentFile.parentFile
@@ -56,6 +57,44 @@ println "\nCenário 4: JSON malformado -> HTTP 400"
 def m4base = new Message(); m4base.setBody("{ isto nao e json"); m4base.setProperty("aliquotaCBS", "0.9"); m4base.setProperty("aliquotaIBS", "0.1")
 def m4 = simulaErro(m4base) { calcula.processData(it) }
 check("status 400", m4?.getHeaders()?.get("CamelHttpResponseCode") == 400)
+
+println "\nCenário 5: NF-e XML convertida pelo XSLT -> mesmo total"
+def m5 = calcula.processData(novaMsg("nfe_convertido_esperado.json"))
+def r5 = new JsonSlurper().parseText(m5.getBody())
+check("chave de acesso preservada", r5.documento.chaveAcesso == "35261012345678000195550010000001231000001230")
+check("total tributos = 99.70", r5.totais.valorTotalTributos == 99.70)
+
+println "\nCenário 6: XML sem infNFe (XSLT gera JSON vazio) -> HTTP 400"
+def m6base = new Message(); m6base.setBody('{ "documento": { }, "itens": [ ] }'); m6base.setProperty("aliquotaCBS", "0.9"); m6base.setProperty("aliquotaIBS", "0.1")
+def m6 = simulaErro(m6base) { calcula.processData(it) }
+check("status 400", m6?.getHeaders()?.get("CamelHttpResponseCode") == 400)
+
+println "\nCenário 7: Value Mapping por NCM (medicamento com alíquota reduzida)"
+ValueMappingApi.tabela = [
+    "SIMULADOR|NCM|84713012|CBS|ALIQUOTA": "0.9",  "SIMULADOR|NCM|84713012|IBS|ALIQUOTA": "0.1",
+    "SIMULADOR|NCM|30049099|CBS|ALIQUOTA": "0.36", "SIMULADOR|NCM|30049099|IBS|ALIQUOTA": "0.04"
+]
+def m7 = calcula.processData(novaMsg("request_value_mapping.json"))
+def r7 = new JsonSlurper().parseText(m7.getBody())
+// Item 3: 10 x 25,00 = 250,00 | CBS 0,36% = 0,90 | IBS 0,04% = 0,10
+check("item 3 usa Value Mapping", r7.itens[2].origemAliquota == "VALUE_MAPPING")
+check("item 2 (sem mapeamento) usa padrão", r7.itens[1].origemAliquota == "PADRAO")
+check("CBS item 3 = 0.90", r7.itens[2].valorCBS == 0.90)
+check("total CBS = 90.63", r7.totais.valorCBS == 90.63)
+check("total tributos = 100.70", r7.totais.valorTotalTributos == 100.70)
+new File(raiz, "test/payloads/response_value_mapping_exemplo.json").setText(m7.getBody(), "UTF-8")
+
+println "\nCenário 8: Value Mapping com valor inválido -> HTTP 500"
+ValueMappingApi.tabela = ["SIMULADOR|NCM|84713012|CBS|ALIQUOTA": "abc"]
+def m8 = simulaErro(novaMsg("request_ok.json")) { calcula.processData(it) }
+check("status 500", m8?.getHeaders()?.get("CamelHttpResponseCode") == 500)
+ValueMappingApi.tabela = [:]
+
+println "\nCenário 9: ID da simulação para o Data Store"
+def m9 = calcula.processData(novaMsg("request_ok.json"))
+def id9 = m9.getProperty("idSimulacao")
+check("property idSimulacao no formato SIM-<numero>-<timestamp>", id9 ==~ /SIM-000123-\d{17}/)
+check("mesmo ID no JSON de resposta", new JsonSlurper().parseText(m9.getBody()).idSimulacao == id9)
 
 println "\nResultado: $ok OK, $falha falha(s)\n"
 println "Exemplo de resposta (cenário 1):\n" + m1.getBody()

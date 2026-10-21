@@ -10,12 +10,17 @@
  *   aliquotaCBS  -> percentual, ex.: 0.9
  *   aliquotaIBS  -> percentual, ex.: 0.1
  *   logPayload   -> "true" anexa entrada/saída no MPL (opcional)
+ * Value Mapping (opcional): VM_Aliquotas_NCM define alíquotas por NCM;
+ *   NCM sem mapeamento usa as alíquotas padrão acima.
  * Saída   : body JSON com valores por item e totais
+ *           property idSimulacao -> Entry ID para gravar no Data Store (Evolução 3)
  *
  * AVISO: simulação para fins de estudo/portfólio. Base de cálculo simplificada
  * (quantidade x valor unitário - desconto). Não substitui o cálculo oficial.
  */
 import com.sap.gateway.ip.core.customdev.util.Message
+import com.sap.it.api.ITApiFactory
+import com.sap.it.api.mapping.ValueMappingApi
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
@@ -66,23 +71,39 @@ def Message processData(Message message) {
         BigDecimal base = arred(qtd * vUnit - desc)
         if (base < 0) throw new IllegalArgumentException("${ref}: desconto maior que o valor do item.")
 
-        BigDecimal vCBS = arred(base * aliqCBS / 100)
-        BigDecimal vIBS = arred(base * aliqIBS / 100)
+        // Evolução 2: alíquota específica por NCM (Value Mapping); se não houver, usa a padrão.
+        BigDecimal vmCBS = aliquotaPorNcm(ncm, "CBS")
+        BigDecimal vmIBS = aliquotaPorNcm(ncm, "IBS")
+        BigDecimal itemCBS = vmCBS != null ? vmCBS : aliqCBS
+        BigDecimal itemIBS = vmIBS != null ? vmIBS : aliqIBS
+        String origem = (vmCBS != null || vmIBS != null) ? "VALUE_MAPPING" : "PADRAO"
+
+        BigDecimal vCBS = arred(base * itemCBS / 100)
+        BigDecimal vIBS = arred(base * itemIBS / 100)
 
         totBase += base; totCBS += vCBS; totIBS += vIBS
         itensSaida << [
-            item       : it.item ?: (idx + 1),
-            ncm        : ncm,
-            descricao  : it.descricao,
-            baseCalculo: base,
-            valorCBS   : vCBS,
-            valorIBS   : vIBS
+            item          : it.item ?: (idx + 1),
+            ncm           : ncm,
+            descricao     : it.descricao,
+            baseCalculo   : base,
+            aliquotaCBS   : itemCBS,
+            aliquotaIBS   : itemIBS,
+            origemAliquota: origem,
+            valorCBS      : vCBS,
+            valorIBS      : vIBS
         ]
     }
 
+    // Evolução 3: ID único da simulação, usado como Entry ID no Data Store.
+    OffsetDateTime agora = OffsetDateTime.now(ZoneId.of("America/Sao_Paulo"))
+    String numeroLimpo = doc.numero.toString().replaceAll(/[^A-Za-z0-9]/, "")
+    String idSimulacao = "SIM-${numeroLimpo}-${agora.format(java.time.format.DateTimeFormatter.ofPattern('yyyyMMddHHmmssSSS'))}".toString()
+
     def saida = [
+        idSimulacao  : idSimulacao,
         documento    : doc,
-        parametros   : [aliquotaCBS: aliqCBS, aliquotaIBS: aliqIBS],
+        parametros   : [aliquotaPadraoCBS: aliqCBS, aliquotaPadraoIBS: aliqIBS],
         itens        : itensSaida,
         totais       : [
             baseCalculo       : arred(totBase),
@@ -90,7 +111,7 @@ def Message processData(Message message) {
             valorIBS          : arred(totIBS),
             valorTotalTributos: arred(totCBS + totIBS)
         ],
-        processadoEm : OffsetDateTime.now(ZoneId.of("America/Sao_Paulo")).toString(),
+        processadoEm : agora.toString(),
         observacao   : "Simulação para estudo. Não substitui o cálculo fiscal oficial."
     ]
 
@@ -98,6 +119,7 @@ def Message processData(Message message) {
     message.setBody(bodyOut)
     message.setHeader("Content-Type", "application/json")
     message.setProperty("totalTributos", saida.totais.valorTotalTributos.toPlainString())
+    message.setProperty("idSimulacao", idSimulacao)
 
     if (message.getProperty("logPayload")?.toString()?.equalsIgnoreCase("true")) {
         anexarLog(message, "Entrada", bodyIn)
@@ -133,7 +155,28 @@ private BigDecimal arred(BigDecimal v) {
     return v.setScale(2, RoundingMode.HALF_UP)
 }
 
-// JsonOutput grava acentos como ç. Convertemos de volta para "ç" (só caracteres
+// Value Mapping "VM_Aliquotas_NCM":
+//   origem  SIMULADOR / NCM       ->  destino CBS / ALIQUOTA   (ex.: 30049099 -> 0.36)
+//   origem  SIMULADOR / NCM       ->  destino IBS / ALIQUOTA   (ex.: 30049099 -> 0.04)
+// Retorna null se o NCM não estiver mapeado (aí vale a alíquota padrão do Content Modifier).
+private BigDecimal aliquotaPorNcm(String ncm, String tributo) {
+    def api = ITApiFactory.getApi(ValueMappingApi.class, null)
+    String valor = api?.getMappedValue("SIMULADOR", "NCM", ncm, tributo, "ALIQUOTA")
+    BigDecimal resultado = null
+    if (valor?.trim()) {
+        try {
+            resultado = new BigDecimal(valor.trim().replace(",", "."))
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Value Mapping com alíquota inválida para NCM ${ncm} (${tributo}): '${valor}'")
+        }
+        if (resultado < 0 || resultado > 100) {
+            throw new IllegalStateException("Value Mapping fora da faixa 0-100 para NCM ${ncm} (${tributo}): ${resultado}")
+        }
+    }
+    return resultado
+}
+
+// JsonOutput grava acentos como sequência de escape unicode. Convertemos de volta (só caracteres
 // acima de 0x7F; aspas e caracteres de controle continuam escapados, então o JSON segue válido).
 private String semEscape(String json) {
     return json.replaceAll(/(?<!\\)\\u([0-9a-fA-F]{4})/) { all, hex ->
