@@ -164,5 +164,5 @@ groovy -cp build test/RodarTestes.groovy
 
 ## Autora
 
-**Adriana Vital dos Santos** – Consultora SAP BTP | Integration Suite (CPI) | SAP Certified Integration Developer
+**Adriana Vital dos Santos** – Consultora SAP Integration Suite (CPI) | SAP Certified Integration Developer
 [LinkedIn](https://www.linkedin.com/in/adrianavsantos/)
