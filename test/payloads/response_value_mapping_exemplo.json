@@ -1,5 +1,5 @@
 {
-    "idSimulacao": "SIM-000125-20261021195228009",
+    "idSimulacao": "SIM-000125-20261023162033837",
     "documento": {
         "numero": "000125",
         "serie": "1",
@@ -52,6 +52,6 @@
         "valorIBS": 10.07,
         "valorTotalTributos": 100.70
     },
-    "processadoEm": "2026-10-21T19:52:28.009320395-03:00",
+    "processadoEm": "2026-10-23T16:20:33.837023318-03:00",
     "observacao": "Simulação para estudo. Não substitui o cálculo fiscal oficial."
 }

@@ -1,10 +1,10 @@
 # Simulador CBS/IBS – SAP Cloud Integration (CPI)
 
-Integração de estudo no **SAP Integration Suite** que recebe documentos fiscais via REST (**JSON ou XML da NF-e**), valida os itens e calcula **CBS** e **IBS** (Reforma Tributária – LC 214/2025), com **alíquotas por NCM** mantidas em Value Mapping e **histórico** de cada simulação gravado no Data Store.
+Integração de estudo no **SAP Integration Suite** que recebe documentos fiscais via REST (**JSON ou XML da NF-e**), valida os itens e calcula **CBS** e **IBS** (Reforma Tributária – LC 214/2025), com **alíquotas por NCM** mantidas em Value Mapping, **histórico** de cada simulação gravado no Data Store e a API publicada no **SAP API Management** com **rate limit**.
 
 > **Aviso:** projeto de portfólio para estudo. A base de cálculo é simplificada e as alíquotas são didáticas; não substitui o cálculo fiscal oficial.
 
-*English summary: SAP CPI integration that receives invoices via REST (JSON or Brazilian NF-e XML), validates them and simulates the new Brazilian consumption taxes (CBS/IBS). Features XSLT mapping, NCM-based rates via Value Mapping, Data Store history with lookup API, externalized parameters and standardized error handling.*
+*English summary: SAP CPI integration that receives invoices via REST (JSON or Brazilian NF-e XML), validates them and simulates the new Brazilian consumption taxes (CBS/IBS). Features XSLT mapping, NCM-based rates via Value Mapping, Data Store history with lookup API, API Management proxy with quota policy, externalized parameters and standardized HTTP error handling (400/404/415/500).*
 
 ---
 
@@ -12,18 +12,24 @@ Integração de estudo no **SAP Integration Suite** que recebe documentos fiscai
 
 ```mermaid
 flowchart LR
-    A[Cliente REST<br/>Postman / ERP] -- "POST JSON" --> B1[HTTPS<br/>/cbsibs/simular]
+    A[Cliente REST<br/>Postman / ERP] -- "POST JSON" --> P[API Management<br/>/v1/cbsibs/simular<br/>Quota 3/min]
+    P --> B1[HTTPS<br/>/cbsibs/simular]
     A -- "POST XML NF-e" --> B2[HTTPS<br/>/cbsibs/nfe]
     A -- "GET + header simulacaoId" --> B3[HTTPS<br/>/cbsibs/historico]
     subgraph CPI["SAP Cloud Integration"]
-        B2 --> X[XSLT<br/>NF-e → JSON]
+        B2 --> R{Router<br/>Content-Type}
+        R -- xml --> X[XSLT<br/>NF-e → JSON]
+        R -- outro --> R415[HTTP 415]
         X --> C[Content Modifier<br/>alíquotas padrão]
         B1 --> C
         C --> D[Groovy<br/>CalculaCBSIBS]
         VM[(Value Mapping<br/>alíquota por NCM)] -.-> D
         D --> W[Data Store Write<br/>HistoricoSimulacoes]
         W --> E[Resposta JSON<br/>HTTP 200]
-        B3 --> G[Data Store Get]
+        B3 --> V{Router<br/>formato do ID}
+        V -- válido --> G[Data Store Get]
+        V -- inválido --> R400[HTTP 400]
+        G -. não encontrado .-> R404[HTTP 404]
         W -.-> G
         ERR[Exception Subprocess<br/>Groovy TrataErro] -.-> F[Erro JSON<br/>HTTP 400 / 500]
     end
@@ -35,6 +41,7 @@ flowchart LR
 | `CBS_IBS_Simulador_NFe` | Integration Flow | `POST /cbsibs/nfe` (XML da NF-e) |
 | `CBS_IBS_Historico` | Integration Flow | `GET /cbsibs/historico` (header `simulacaoId`) |
 | `VM_Aliquotas_NCM` | Value Mapping | Alíquotas CBS/IBS por NCM |
+| `CBS_IBS_Simulador_API` | API Proxy (API Management) | `POST /v1/cbsibs/simular` com policy Quota (3 chamadas/min) |
 
 ## O que este projeto demonstra
 
@@ -47,6 +54,9 @@ flowchart LR
 | **Value Mapping** consultado via `ValueMappingApi` com fallback para o padrão | `CalculaCBSIBS.groovy` + `VM_Aliquotas_NCM` |
 | **Data Store** Write/Get com chave de negócio, retenção e criptografia | `CBS_IBS_Simulador` e `CBS_IBS_Historico` |
 | Tratamento de erro padronizado (400 x 500) | `src/scripts/TrataErro.groovy` |
+| **Router** validando `Content-Type` (HTTP 415) e formato do ID por regex (HTTP 400) | `CBS_IBS_Simulador_NFe` e `CBS_IBS_Historico` |
+| **Exception Subprocess** devolvendo 404 para ID inexistente | `CBS_IBS_Historico` |
+| **SAP API Management**: API Proxy + policy **Quota** distribuída | `CBS_IBS_Simulador_API` |
 | Log de payload controlado por parâmetro (memória e LGPD) | parâmetro `LOG_PAYLOAD` |
 | Testes locais dos scripts e do XSLT, sem tenant | `test/RodarTestes.groovy` (23 verificações) |
 
@@ -69,10 +79,14 @@ flowchart LR
 
 **Histórico:** cada resposta traz um `idSimulacao` (ex.: `SIM-000125-20261021193344938`), que é a chave no Data Store e pode ser consultada depois em `GET /cbsibs/historico`.
 
-**Erro de validação** (HTTP 400):
-```json
-{ "status": 400, "erro": "REQUISICAO_INVALIDA", "mensagem": "itens[0].ncm deve ter 8 dígitos numéricos (recebido: '8471')." }
-```
+**Erros padronizados:**
+
+| HTTP | Quando | Exemplo de `erro` |
+|---|---|---|
+| 400 | Dados inválidos (NCM, JSON, ID do histórico) | `REQUISICAO_INVALIDA` / `ID_INVALIDO` |
+| 404 | Simulação não encontrada no Data Store | `SIMULACAO_NAO_ENCONTRADA` |
+| 415 | Endpoint NF-e chamado sem `Content-Type` XML | `TIPO_NAO_SUPORTADO` |
+| 500 | Falha de configuração (ex.: alíquota ausente) ou quota excedida no gateway | `ERRO_PROCESSAMENTO` / `policies.ratelimit.QuotaViolation` |
 
 ## Regras de cálculo
 
@@ -93,6 +107,9 @@ flowchart LR
 | Value Mapping em vez de parâmetro | Tabela mantida pela área fiscal sem alterar nem reimplantar o iFlow |
 | Chave de negócio no Data Store | ID gerado (`SIM-<numero>-<timestamp>`) permite consulta; sem ele o CPI gera UUID impossível de rastrear |
 | Data Store com expiração de 30 dias e criptografia | Histórico curto e LGPD; para longo prazo, usar banco (HANA Cloud) |
+| Router antes do XSLT (415) | Valida o contrato cedo; formato errado não chega a quebrar o mapeamento |
+| 400 x 404 no histórico | Regex no Router separa ID mal formado (erro do chamador) de ID inexistente (Exception Subprocess) |
+| Quota em vez de Spike Arrest | Spike Arrest suaviza picos por servidor e não bloqueou de forma previsível no ambiente distribuído; Quota distribuída conta de forma centralizada |
 
 ## Estrutura
 
@@ -103,9 +120,10 @@ flowchart LR
 ├── test/mock/                   Mocks das APIs do CPI (Message, ValueMappingApi)
 ├── test/RodarTestes.groovy      Testes locais (23 verificações)
 ├── docs/passo-a-passo-iflow.md  Como montar o iFlow base no trial
-├── docs/evolucoes.md            Como montar as 3 evoluções
+├── docs/evolucoes.md            Como montar as evoluções e as melhorias
 ├── docs/img/                    Prints do tenant
-└── iflow/                       Exports (.zip) dos artefatos do CPI
+├── iflow/                       Export (.zip) do pacote do CPI
+└── apim/                        Export (.zip) do API Proxy
 ```
 
 ## Como rodar os testes localmente
@@ -153,14 +171,38 @@ groovy -cp build test/RodarTestes.groovy
 ![Data Store](docs/img/12-datastore-entrada.png)
 ![Consulta do histórico](docs/img/13-postman-historico.png)
 
+### Melhoria 1 – Router validando Content-Type (HTTP 415)
+
+![iFlow NF-e com Router](docs/img/14-iflow-router-415.png)
+![Postman 415](docs/img/15-postman-415.png)
+
+### Melhoria 2 – Histórico com 400 e 404
+
+![iFlow histórico com Router e Exception Subprocess](docs/img/16-iflow-historico-404.png)
+![Postman 404](docs/img/17-postman-404.png)
+
+### Melhoria 3 – SAP API Management com rate limit
+
+**Chamada pelo proxy** (`/v1/cbsibs/simular`) – HTTP 200
+![Postman via API Management](docs/img/18-postman-apim-200.png)
+
+**Policy Quota** (3 chamadas por minuto, distribuída)
+![Policy Quota](docs/img/19-apim-quota.png)
+
+**4ª chamada no mesmo minuto bloqueada no gateway**
+![Quota violation](docs/img/20-postman-rate-limit.png)
+
 ## Roadmap
 
 - [x] Receber o XML da NF-e e converter para JSON (XSLT)
 - [x] Alíquotas por NCM via Value Mapping
 - [x] Gravar o histórico de simulações no Data Store e consultar por ID
-- [ ] Router validando `Content-Type` no endpoint NF-e (HTTP 415)
-- [ ] Exception Subprocess no iFlow de histórico (HTTP 404 para ID inexistente)
-- [ ] Publicar as APIs no SAP API Management com policy de rate limit
+- [x] Router validando `Content-Type` no endpoint NF-e (HTTP 415)
+- [x] Exception Subprocess no iFlow de histórico (HTTP 404 para ID inexistente)
+- [x] Publicar a API no SAP API Management com policy de rate limit
+- [ ] Converter a violação de quota em HTTP 429 (Raise Fault na Fault Rule)
+- [ ] Validar o XML da NF-e contra o XSD oficial (XML Validator)
+- [ ] Verify API Key por consumidor e produto no Developer Hub
 
 ## Autora
 
