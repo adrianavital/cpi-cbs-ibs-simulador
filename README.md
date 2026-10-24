@@ -200,9 +200,9 @@ groovy -cp build test/RodarTestes.groovy
 - [x] Router validando `Content-Type` no endpoint NF-e (HTTP 415)
 - [x] Exception Subprocess no iFlow de histórico (HTTP 404 para ID inexistente)
 - [x] Publicar a API no SAP API Management com policy de rate limit
-- [ ] Converter a violação de quota em HTTP 429 (Raise Fault na Fault Rule)
-- [ ] Validar o XML da NF-e contra o XSD oficial (XML Validator)
-- [ ] Verify API Key por consumidor e produto no Developer Hub
+- [x] Converter a violação de quota em HTTP 429 (Raise Fault)
+- [x] Validar o XML da NF-e contra o XSD (XML Validator)
+- [x] Verify API Key por consumidor e produto no Developer Hub
 
 ## Autora
 
