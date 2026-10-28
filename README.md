@@ -192,6 +192,16 @@ groovy -cp build test/RodarTestes.groovy
 **4ª chamada no mesmo minuto bloqueada no gateway**
 ![Quota violation](docs/img/20-postman-rate-limit.png)
 
+## Integrações adicionais (outros protocolos SAP)
+
+Além do cenário CBS/IBS, este repositório inclui iFlows avulsos para demonstrar protocolos de integração comuns em projetos SAP que não aparecem no simulador fiscal:
+
+| Protocolo | iFlow | Detalhe |
+|---|---|---|
+| **OData V2** | `SF_EmployeeCentral_OData` | Consome uma API real do **SuccessFactors Employee Central** (sandbox do SAP Business Accelerator Hub) — [documentação completa](integracoes-sap/successfactors-odata/README.md) |
+| SOAP | *em andamento* | — |
+| JMS (assíncrono) | *em andamento* | — |
+
 ## Roadmap
 
 - [x] Receber o XML da NF-e e converter para JSON (XSLT)
@@ -203,6 +213,9 @@ groovy -cp build test/RodarTestes.groovy
 - [x] Converter a violação de quota em HTTP 429 (Raise Fault)
 - [x] Validar o XML da NF-e contra o XSD (XML Validator)
 - [x] Verify API Key por consumidor e produto no Developer Hub
+- [x] Consumir API OData do SAP SuccessFactors (Employee Central)
+- [ ] Consumir um serviço SOAP
+- [ ] Endpoint assíncrono com JMS
 
 ## Autora
 
