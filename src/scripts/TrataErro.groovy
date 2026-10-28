@@ -3,8 +3,9 @@
  * Usado no Exception Subprocess do iFlow CBS_IBS_Simulador.
  *
  * Converte a exceção capturada em uma resposta JSON padronizada:
- *   - IllegalArgumentException -> HTTP 400 (erro do chamador: payload inválido)
- *   - qualquer outra            -> HTTP 500 (erro de configuração/processamento)
+ *   - XML reprovado no XML Validator (XSD) -> HTTP 400 XML_INVALIDO
+ *   - IllegalArgumentException             -> HTTP 400 REQUISICAO_INVALIDA
+ *   - qualquer outra                       -> HTTP 500 ERRO_PROCESSAMENTO
  */
 import com.sap.gateway.ip.core.customdev.util.Message
 import groovy.json.JsonOutput
@@ -21,12 +22,13 @@ def Message processData(Message message) {
         causa = causa.cause
     }
 
-    boolean erroCliente = causa instanceof IllegalArgumentException
+    boolean erroXsd = erroDeValidacaoXsd(ex)
+    boolean erroCliente = erroXsd || causa instanceof IllegalArgumentException
     int status = erroCliente ? 400 : 500
 
     def resposta = [
         status   : status,
-        erro     : erroCliente ? "REQUISICAO_INVALIDA" : "ERRO_PROCESSAMENTO",
+        erro     : erroXsd ? "XML_INVALIDO" : (erroCliente ? "REQUISICAO_INVALIDA" : "ERRO_PROCESSAMENTO"),
         mensagem : causa?.message ?: "Erro não identificado",
         ocorridoEm: OffsetDateTime.now(ZoneId.of("America/Sao_Paulo")).toString()
     ]
@@ -35,6 +37,20 @@ def Message processData(Message message) {
     message.setHeader("Content-Type", "application/json")
     message.setHeader("CamelHttpResponseCode", status)
     return message
+}
+
+// XML Validator do CPI: a exceção (ou uma causa) é de validação e/ou traz
+// a mensagem do parser de schema, que começa com "cvc-".
+private boolean erroDeValidacaoXsd(def ex) {
+    def e = ex
+    int guarda = 0
+    while (e != null && guarda++ < 20) {
+        if (e.getClass().name.toLowerCase().contains("validat") || (e.message ?: "").contains("cvc-")) {
+            return true
+        }
+        e = (e.cause != e) ? e.cause : null
+    }
+    return false
 }
 
 // Mantém acentos legíveis no JSON (ver CalculaCBSIBS.groovy).

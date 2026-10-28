@@ -134,3 +134,46 @@ Testes: ID existente → 200 · `SIM-000999-20260101000000000` → 404 · `abc` 
 Testes: 3 chamadas → 200 · 4ª no mesmo minuto → 500 `policies.ratelimit.QuotaViolation`.
 
 > Spike Arrest (`5pm`) foi testado primeiro e não bloqueou de forma previsível: ele suaviza o tráfego por servidor no ambiente distribuído. Quota distribuída conta de forma centralizada.
+
+## Melhoria 4 – HTTP 429 na violação de quota
+
+**Artifact:** `CBS_IBS_Simulador_API` (API Proxy)
+
+| # | Passo | Detalhe |
+|---|---|---|
+| 1 | Quota não bloqueia mais a chamada | `CotaPorMinuto` → `continueOnError="true"` |
+| 2 | Raise Fault | PreFlow → `Retornar429`, **Condition String** `ratelimit.CotaPorMinuto.failed = "true"` |
+| 3 | Resposta | Status `429`, corpo JSON (`variablePrefix="@"` evita que `{ }` seja lido como variável) |
+| 4 | Implantar | Update → Save → Deploy |
+
+Testes: 3 chamadas → 200 · 4ª no mesmo minuto → **429** `LIMITE_EXCEDIDO`.
+
+## Melhoria 5 – XML Validator com o XSD da NF-e
+
+**iFlow:** `CBS_IBS_Simulador_NFe`
+
+| # | Passo | Detalhe |
+|---|---|---|
+| 1 | XML Validator | Antes do XSLT, na rota `XML` do Router · Schema `NFe_simulador_v4.00.xsd` |
+| 2 | Script de erro | `TrataErro.groovy` v2 reconhece a exceção do validador pelo nome da classe (`...Validat...`) e devolve `XML_INVALIDO` |
+
+> O XSD é um recorte do leiaute oficial 4.00 (mesmo namespace, mesmas tags e patterns do `tiposBasico_v4.00.xsd`), porque o oficial completo exige a NF-e inteira com assinatura digital e o XML de estudo deste repositório é reduzido.
+
+Testes: NF-e válida → 200 (total 99,70) · NF-e com NCM de 7 dígitos → **400** `XML_INVALIDO` · `Content-Type: application/json` → 415 (regressão da Melhoria 1 OK).
+
+> A mensagem de erro do CPI nem sempre traz o detalhe do schema (`cvc-pattern-valid`); em runtime o XML Validator pode devolver uma mensagem genérica. O status e o código (`400`/`XML_INVALIDO`) continuam corretos.
+
+## Melhoria 6 – Verify API Key por consumidor e produto
+
+**Artifact:** `CBS_IBS_Simulador_API` (API Proxy)
+
+| # | Passo | Detalhe |
+|---|---|---|
+| 1 | Product | Engage → Products → `CBS_IBS_Simulador_Product`, Approval Type **Auto** |
+| 2 | Developer e Application | Engage → Developers e Applications → `App_Teste_Portfolio` vinculado ao Product |
+| 3 | Policy | PreFlow, antes da `CotaPorMinuto` → **Verify API Key** `VerificarAPIKey` (`APIKey ref="request.header.apikey"`) |
+| 4 | Implantar | Update → Save → Deploy |
+
+Testes (sempre via **API Proxy URL**, mantendo o Basic Auth): sem `apikey` válido → 401 `Invalid ApiKey` (`oauth.v2.InvalidApiKey`) · com `apikey` da Application → 200.
+
+> Importante: o Verify API Key só é avaliado quando a chamada passa pelo **API Proxy**. Testar direto no endpoint do CPI não valida essa policy.

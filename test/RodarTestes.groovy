@@ -96,6 +96,16 @@ def id9 = m9.getProperty("idSimulacao")
 check("property idSimulacao no formato SIM-<numero>-<timestamp>", id9 ==~ /SIM-000123-\d{17}/)
 check("mesmo ID no JSON de resposta", new JsonSlurper().parseText(m9.getBody()).idSimulacao == id9)
 
+println "\nCenário 10: XML reprovado no XML Validator (XSD) -> HTTP 400"
+def m10 = new Message()
+m10.setProperty("CamelExceptionCaught", new RuntimeException("Validation failed",
+    new Exception("cvc-pattern-valid: Value '8517627' is not facet-valid with respect to pattern '[0-9]{2}|[0-9]{8}' for type 'TNcm'.")))
+trataErro.processData(m10)
+def r10 = new JsonSlurper().parseText(m10.getBody())
+check("status 400", m10.getHeaders().get("CamelHttpResponseCode") == 400)
+check("erro XML_INVALIDO", r10.erro == "XML_INVALIDO")
+check("mensagem cita o NCM", r10.mensagem.contains("8517627"))
+
 println "\nResultado: $ok OK, $falha falha(s)\n"
 println "Exemplo de resposta (cenário 1):\n" + m1.getBody()
 if (falha > 0) System.exit(1)
