@@ -199,7 +199,7 @@ Além do cenário CBS/IBS, este repositório inclui iFlows avulsos para demonstr
 | Protocolo | iFlow | Detalhe |
 |---|---|---|
 | **OData V2** | `SF_EmployeeCentral_OData` | Consome uma API real do **SuccessFactors Employee Central** (sandbox do SAP Business Accelerator Hub) — [documentação completa](integracoes-sap/successfactors-odata/README.md) |
-| SOAP | *em andamento* | — |
+| **SOAP** | `Calculadora_SOAP` | Consome um web service **SOAP 1.1 via WSDL** com o SOAP Adapter nativo do CPI — [documentação completa](integracoes-sap/calculadora-soap/README.md) |
 | JMS (assíncrono) | *em andamento* | — |
 
 ## Roadmap
@@ -214,7 +214,7 @@ Além do cenário CBS/IBS, este repositório inclui iFlows avulsos para demonstr
 - [x] Validar o XML da NF-e contra o XSD (XML Validator)
 - [x] Verify API Key por consumidor e produto no Developer Hub
 - [x] Consumir API OData do SAP SuccessFactors (Employee Central)
-- [ ] Consumir um serviço SOAP
+- [x] Consumir um serviço SOAP
 - [ ] Endpoint assíncrono com JMS
 
 ## Autora
